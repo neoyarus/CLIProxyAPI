@@ -81,6 +81,8 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 		state.strategy = "fill-first"
 	case "reset-drain", "resetdrain", "reset-first", "resetfirst", "rd":
 		state.strategy = "reset-drain"
+	case "reset-pace", "resetpace", "reset-drain-paced", "paced-reset-drain", "rp":
+		state.strategy = "reset-pace"
 	}
 	state.sessionAffinity = cfg.Routing.SessionAffinity
 	if ttl := strings.TrimSpace(cfg.Routing.SessionAffinityTTL); ttl != "" {
@@ -109,6 +111,8 @@ func newRoutingSelector(state routingRuntimeState) coreauth.Selector {
 		selector = &coreauth.FillFirstSelector{}
 	case "reset-drain":
 		selector = &coreauth.ResetDrainSelector{}
+	case "reset-pace":
+		selector = &coreauth.ResetDrainSelector{Paced: true}
 	default:
 		selector = &coreauth.RoundRobinSelector{}
 	}

@@ -532,7 +532,9 @@ type QuotaExceeded struct {
 type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
 	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first",
-	// "reset-drain" (prefer the credential whose usage window resets soonest).
+	// "reset-drain" (prefer the credential whose usage window resets soonest),
+	// "reset-pace" (reset-drain, but only while a credential is on pace through its
+	// weekly window; ahead-of-pace credentials yield to the others).
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
 	// SessionAffinity enables universal session-sticky routing for all clients.

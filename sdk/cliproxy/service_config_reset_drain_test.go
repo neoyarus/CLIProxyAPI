@@ -27,3 +27,24 @@ func TestResetDrainRoutingSelector(t *testing.T) {
 		t.Fatalf("selector type with session affinity = %T, want *auth.SessionAffinitySelector", newRoutingSelector(state))
 	}
 }
+
+func TestResetPaceRoutingSelector(t *testing.T) {
+	for _, input := range []string{"reset-pace", "resetpace", "reset-drain-paced", "rp"} {
+		state := normalizedRoutingRuntimeState(&internalconfig.Config{
+			Routing: internalconfig.RoutingConfig{Strategy: input},
+		})
+		if state.strategy != "reset-pace" {
+			t.Fatalf("strategy(%q) = %q, want reset-pace", input, state.strategy)
+		}
+		selector, ok := newRoutingSelector(state).(*coreauth.ResetDrainSelector)
+		if !ok || !selector.Paced {
+			t.Fatalf("selector = %#v, want paced *auth.ResetDrainSelector", newRoutingSelector(state))
+		}
+	}
+	state := normalizedRoutingRuntimeState(&internalconfig.Config{
+		Routing: internalconfig.RoutingConfig{Strategy: "reset-drain"},
+	})
+	if selector := newRoutingSelector(state).(*coreauth.ResetDrainSelector); selector.Paced {
+		t.Fatal("reset-drain selector is paced, want unpaced")
+	}
+}

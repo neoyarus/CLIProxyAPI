@@ -19,3 +19,12 @@ func TestNormalizeRoutingStrategyResetDrain(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeRoutingStrategyResetPace(t *testing.T) {
+	for _, input := range []string{"reset-pace", "resetpace", "reset-drain-paced", "paced-reset-drain", "rp", " Reset-Pace "} {
+		got, ok := normalizeRoutingStrategy(input)
+		if !ok || got != "reset-pace" {
+			t.Fatalf("normalizeRoutingStrategy(%q) = %q, %v; want reset-pace, true", input, got, ok)
+		}
+	}
+}
