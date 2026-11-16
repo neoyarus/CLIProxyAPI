@@ -320,6 +320,8 @@ func normalizeRoutingStrategy(strategy string) (string, bool) {
 		return "fill-first", true
 	case "reset-drain", "resetdrain", "reset-first", "resetfirst", "rd":
 		return "reset-drain", true
+	case "reset-pace", "resetpace", "reset-drain-paced", "paced-reset-drain", "rp":
+		return "reset-pace", true
 	default:
 		return "", false
 	}

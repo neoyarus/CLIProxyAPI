@@ -33,7 +33,19 @@ import (
 // ranks behind every credential with a known reset. Credentials whose snapshot
 // shows a window at 100% usage rank last so a fresh cooldown is not needed to
 // route around them.
+//
+// With Paced set (the "reset-pace" strategy), credentials are additionally split
+// by their pace through the long window: a credential has used no more of the
+// window's quota than the share of the window that has elapsed (at most 50% used
+// half-way to the reset) is on pace and is preferred, still in the order above.
+// Once every credential is ahead of pace, the one least ahead is picked, so no
+// single credential is drained early while the others sit idle. The credential
+// with the nearest reset is therefore held at its pace line and only the demand
+// beyond that spills to the next credential.
 type ResetDrainSelector struct {
+	// Paced enables the pace split described above.
+	Paced bool
+
 	mu     sync.Mutex
 	probed map[string]struct{}
 	// now overrides the clock in tests.
@@ -111,7 +123,12 @@ func (s *ResetDrainSelector) markProbedLocked(authID string) {
 }
 
 type resetDrainRank struct {
-	tier           int
+	tier int
+	// aheadOfPace and paceOvershoot are only set by the paced variant:
+	// paceOvershoot is how many percentage points the long-window usage is
+	// ahead of the elapsed share of that window.
+	aheadOfPace    bool
+	paceOvershoot  float64
 	bucket         int64
 	shortRemaining float64
 	longRemaining  float64
@@ -122,6 +139,12 @@ type resetDrainRank struct {
 func (r resetDrainRank) less(other resetDrainRank) bool {
 	if r.tier != other.tier {
 		return r.tier < other.tier
+	}
+	if r.aheadOfPace != other.aheadOfPace {
+		return !r.aheadOfPace
+	}
+	if r.aheadOfPace && r.paceOvershoot != other.paceOvershoot {
+		return r.paceOvershoot < other.paceOvershoot
 	}
 	if r.bucket != other.bucket {
 		return r.bucket < other.bucket
@@ -171,7 +194,26 @@ func (s *ResetDrainSelector) rankLocked(auth *Auth, now time.Time) resetDrainRan
 		rank.bucket = int64(until / resetDrainBucketSize)
 		rank.resetUnix = anchor.resetAt.Unix()
 	}
+	if s.Paced {
+		if overshoot, ok := long.paceOvershoot(now); ok && overshoot > 0 {
+			rank.aheadOfPace = true
+			rank.paceOvershoot = overshoot
+		}
+	}
 	return rank
+}
+
+// paceOvershoot reports how many percentage points of the window's quota have
+// been used beyond the share of the window that has elapsed. A credential at
+// 60% usage half-way through its window is 10 points ahead; zero or less means
+// it is on or behind pace. ok is false when usage, reset or length is unknown.
+func (w usageWindow) paceOvershoot(now time.Time) (float64, bool) {
+	if w.usedPercent < 0 || w.resetAt.IsZero() || w.length <= 0 {
+		return 0, false
+	}
+	remaining := w.resetAt.Sub(now)
+	elapsedPercent := 100 * (1 - float64(remaining)/float64(w.length))
+	return w.usedPercent - clampPercent(elapsedPercent), true
 }
 
 // usageWindow is one rate-limit window decoded from a passive quota snapshot.

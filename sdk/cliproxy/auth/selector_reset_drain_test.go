@@ -253,3 +253,136 @@ func TestResetDrainSelector_ManagerPicksSoonestReset(t *testing.T) {
 		t.Fatalf("pickNext() after excluding b = %q, want resetdrain-mgr-c", picked.ID)
 	}
 }
+
+func newResetPaceTestSelector() *ResetDrainSelector {
+	return &ResetDrainSelector{Paced: true, now: func() time.Time { return resetDrainTestNow }}
+}
+
+func TestResetPaceSelector_SkipsSoonestResetWhenAheadOfPace(t *testing.T) {
+	t.Parallel()
+
+	// "soon" resets in 2 days, so 5/7 (71%) of its week has passed, but it has
+	// already used 90%. "later" is 2/7 (29%) through its week at 20% used.
+	soon := codexAuth("soon", 0, time.Hour, 90, 2*24*time.Hour)
+	later := codexAuth("later", 0, time.Hour, 20, 5*24*time.Hour)
+
+	if got := pickResetDrain(t, newResetDrainTestSelector(), later, soon); got != "soon" {
+		t.Fatalf("reset-drain Pick() = %q, want soon", got)
+	}
+	if got := pickResetDrain(t, newResetPaceTestSelector(), soon, later); got != "later" {
+		t.Fatalf("reset-pace Pick() = %q, want later (soon is ahead of pace)", got)
+	}
+}
+
+func TestResetPaceSelector_OnPacePrefersSoonestReset(t *testing.T) {
+	t.Parallel()
+
+	// Both are on pace, so the nearest reset wins as in reset-drain.
+	soon := codexAuth("soon", 0, time.Hour, 60, 2*24*time.Hour)
+	later := codexAuth("later", 0, time.Hour, 10, 5*24*time.Hour)
+
+	if got := pickResetDrain(t, newResetPaceTestSelector(), later, soon); got != "soon" {
+		t.Fatalf("Pick() = %q, want soon", got)
+	}
+}
+
+func TestResetPaceSelector_AllAheadPrefersLeastAhead(t *testing.T) {
+	t.Parallel()
+
+	// "soon" is 71% through its week at 80% used (9 points ahead); "later" is
+	// 29% through at 33% used (4 points ahead), so "later" is picked.
+	soon := codexAuth("soon", 0, time.Hour, 80, 2*24*time.Hour)
+	later := codexAuth("later", 0, time.Hour, 33, 5*24*time.Hour)
+
+	if got := pickResetDrain(t, newResetPaceTestSelector(), soon, later); got != "later" {
+		t.Fatalf("Pick() = %q, want later (least ahead of pace)", got)
+	}
+}
+
+func TestResetPaceSelector_FreshWindowIsOnPace(t *testing.T) {
+	t.Parallel()
+
+	// A window that just reset (stale snapshot rolled forward) has 0% used and
+	// counts as on pace, but its reset is a week away so it ranks behind other
+	// on-pace credentials.
+	fresh := codexAuth("fresh", 0, -time.Hour, 99, -time.Hour)
+	onPace := codexAuth("on-pace", 0, time.Hour, 50, 3*24*time.Hour)
+	ahead := codexAuth("ahead", 0, time.Hour, 95, 24*time.Hour)
+
+	if got := pickResetDrain(t, newResetPaceTestSelector(), fresh, ahead, onPace); got != "on-pace" {
+		t.Fatalf("Pick() = %q, want on-pace", got)
+	}
+	if got := pickResetDrain(t, newResetPaceTestSelector(), fresh, ahead); got != "fresh" {
+		t.Fatalf("Pick() = %q, want fresh ahead of the over-pace credential", got)
+	}
+}
+
+func TestResetPaceSelector_UnknownWindowLengthCountsAsOnPace(t *testing.T) {
+	t.Parallel()
+
+	// Without a window length the pace cannot be judged, so the credential keeps
+	// its reset-drain position instead of being pushed behind.
+	noLength := &Auth{
+		ID: "no-length",
+		Quota: QuotaState{
+			ObservedAt: resetDrainTestNow,
+			Signals: map[string]string{
+				"X-Codex-Secondary-Used-Percent": "95",
+				"X-Codex-Secondary-Reset-At":     unixString(resetDrainTestNow.Add(24 * time.Hour)),
+			},
+		},
+	}
+	ahead := codexAuth("ahead", 0, time.Hour, 90, 3*24*time.Hour)
+
+	if got := pickResetDrain(t, newResetPaceTestSelector(), ahead, noLength); got != "no-length" {
+		t.Fatalf("Pick() = %q, want no-length", got)
+	}
+}
+
+func TestResetPaceSelector_ClaudeWeeklyPace(t *testing.T) {
+	t.Parallel()
+
+	claudeAuth := func(id string, weeklyUtilization string, weeklyReset time.Duration) *Auth {
+		return &Auth{
+			ID: id,
+			Quota: QuotaState{
+				ObservedAt: resetDrainTestNow,
+				Signals: map[string]string{
+					"Anthropic-Ratelimit-Unified-5h-Utilization": "0.10",
+					"Anthropic-Ratelimit-Unified-5h-Reset":       unixString(resetDrainTestNow.Add(3 * time.Hour)),
+					"Anthropic-Ratelimit-Unified-7d-Utilization": weeklyUtilization,
+					"Anthropic-Ratelimit-Unified-7d-Reset":       unixString(resetDrainTestNow.Add(weeklyReset)),
+				},
+			},
+		}
+	}
+	// "near" is 4/7 (57%) through its week at 69% used, so it is ahead of pace.
+	near := claudeAuth("near", "0.69", 3*24*time.Hour)
+	far := claudeAuth("far", "0.05", 6*24*time.Hour)
+
+	if got := pickResetDrain(t, newResetPaceTestSelector(), near, far); got != "far" {
+		t.Fatalf("Pick() = %q, want far", got)
+	}
+}
+
+func TestUsageWindowPaceOvershoot(t *testing.T) {
+	t.Parallel()
+
+	week := 7 * 24 * time.Hour
+	half := usageWindow{usedPercent: 50, length: week, resetAt: resetDrainTestNow.Add(week / 2)}
+	if got, ok := half.paceOvershoot(resetDrainTestNow); !ok || got != 0 {
+		t.Fatalf("half-way at 50%% = %v, %v; want 0, true", got, ok)
+	}
+	half.usedPercent = 60
+	if got, _ := half.paceOvershoot(resetDrainTestNow); got != 10 {
+		t.Fatalf("half-way at 60%% = %v, want 10", got)
+	}
+	// A reset further away than the window length (clock skew) clamps to 0% elapsed.
+	skewed := usageWindow{usedPercent: 5, length: week, resetAt: resetDrainTestNow.Add(week + time.Hour)}
+	if got, _ := skewed.paceOvershoot(resetDrainTestNow); got != 5 {
+		t.Fatalf("skewed overshoot = %v, want 5", got)
+	}
+	if _, ok := (usageWindow{usedPercent: -1, length: week, resetAt: resetDrainTestNow}).paceOvershoot(resetDrainTestNow); ok {
+		t.Fatal("unknown usage reported a pace")
+	}
+}
