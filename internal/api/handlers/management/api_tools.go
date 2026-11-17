@@ -135,6 +135,10 @@ func (h *Handler) APICall(c *gin.Context) {
 
 	authIndex := firstNonEmptyString(body.AuthIndexSnake, body.AuthIndexCamel, body.AuthIndexPascal)
 	auth := h.authByIndex(authIndex)
+	if snapshotResponse, ok := claudeSetupTokenUsageResponse(auth, method, parsedURL, time.Now()); ok {
+		c.JSON(http.StatusOK, snapshotResponse)
+		return
+	}
 
 	reqHeaders := body.Header
 	if reqHeaders == nil {
