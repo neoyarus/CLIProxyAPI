@@ -719,6 +719,9 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 	if email := authEmail(auth); email != "" {
 		entry["email"] = email
 	}
+	if isClaudeSetupTokenAuth(auth) {
+		entry["setup_token"] = true
+	}
 	if projectID := authProjectID(auth); projectID != "" {
 		entry["project_id"] = projectID
 	}
@@ -1075,6 +1078,26 @@ func authEmail(auth *coreauth.Auth) string {
 		}
 	}
 	return ""
+}
+
+// isClaudeSetupTokenAuth reports a Claude credential that holds a long-lived setup token
+// (`claude setup-token`). Such tokens are inference-only: they cannot call the usage or
+// profile endpoints, so clients should show the passive quota snapshot instead.
+func isClaudeSetupTokenAuth(auth *coreauth.Auth) bool {
+	if auth == nil || !strings.EqualFold(strings.TrimSpace(auth.Provider), "claude") || auth.Metadata == nil {
+		return false
+	}
+	for _, key := range []string{"is_setup_token", "setup_token"} {
+		if flag, ok := auth.Metadata[key].(bool); ok && flag {
+			return true
+		}
+	}
+	if kind := strings.ToLower(strings.TrimSpace(authAttribute(auth, "auth_kind"))); kind == "setup_token" || kind == "setup-token" {
+		return true
+	}
+	access, _ := auth.Metadata["access_token"].(string)
+	refresh, _ := auth.Metadata["refresh_token"].(string)
+	return strings.HasPrefix(strings.TrimSpace(access), "sk-ant-oat") && strings.TrimSpace(refresh) == ""
 }
 
 func authAttribute(auth *coreauth.Auth, key string) string {
