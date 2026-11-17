@@ -96,8 +96,10 @@ func (ts *ClaudeTokenStorage) SaveTokenToFile(authFilePath string) error {
 		}
 	}()
 
-	// Encode and write the token data as JSON
-	if err = json.NewEncoder(f).Encode(data); err != nil {
+	// Encode and write the token data as indented JSON so the file stays readable.
+	encoder := json.NewEncoder(f)
+	encoder.SetIndent("", "  ")
+	if err = encoder.Encode(data); err != nil {
 		return fmt.Errorf("failed to write token to file: %w", err)
 	}
 	return nil
