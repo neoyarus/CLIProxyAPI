@@ -1259,6 +1259,9 @@ func isAuthBlockedForModelForRequest(ctx context.Context, auth *Auth, model stri
 	if auth.Disabled || auth.Status == StatusDisabled {
 		return true, blockReasonDisabled, time.Time{}
 	}
+	if until := ManualCooldownUntil(auth); until.After(now) {
+		return true, blockReasonCooldown, until
+	}
 	if codexRefreshMissingAccessForRequest(ctx, auth, clientHeaders...) {
 		return true, blockReasonOther, time.Time{}
 	}
