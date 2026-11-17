@@ -270,6 +270,10 @@ type Manager struct {
 	// authLoadGate allows concurrent credential transactions, but excludes whole-store reloads.
 	// Mutations acquire one permit; Load acquires all permits before reading the store.
 	authLoadGate *semaphore.Weighted
+
+	// quotaSnapshotSavedAt records when each credential's passive quota snapshot
+	// was last queued for saving (auth ID -> time.Time).
+	quotaSnapshotSavedAt sync.Map
 }
 
 // NewManager constructs a manager with optional custom selector and hook.

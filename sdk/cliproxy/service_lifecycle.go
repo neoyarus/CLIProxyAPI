@@ -97,6 +97,11 @@ func (s *Service) Run(ctx context.Context) error {
 				log.Warnf("failed to restore cooldown state: %v", errRestoreCooldown)
 			}
 		}
+		if restored, errRestoreQuota := s.coreManager.RestoreQuotaSnapshots(ctx); errRestoreQuota != nil {
+			log.Warnf("failed to restore quota snapshots: %v", errRestoreQuota)
+		} else if restored > 0 {
+			log.Infof("restored quota snapshots for %d credential(s)", restored)
+		}
 		s.registerAvailableExecutors(ctx, executorRegistrationOptions{
 			includeBaseline: true,
 			auths:           s.coreManager.List(),
