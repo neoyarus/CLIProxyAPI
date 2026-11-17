@@ -722,6 +722,9 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 	if isClaudeSetupTokenAuth(auth) {
 		entry["setup_token"] = true
 	}
+	if until := coreauth.ManualCooldownUntil(auth); until.After(time.Now()) {
+		entry["cooldown_until"] = until.UTC().Format(time.RFC3339)
+	}
 	if projectID := authProjectID(auth); projectID != "" {
 		entry["project_id"] = projectID
 	}
